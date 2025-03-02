@@ -3,6 +3,7 @@ import brainspace.mesh as mesh
 import nibabel as nib
 import numpy as np
 import pandas as pd
+from brainspace.gradient.alignment import procrustes_alignment
 from lapy import Solver, io
 
 
@@ -56,12 +57,12 @@ def indices(surface_old, surface_new):
     return indices
 
 
-def surface_eigenmodes(surface_fname, medial_fname, n_modes):
+def surface_eigenmodes(surface_fname, medial_fname, n_modes=200):
     """Calculate the eigenmodes of a cortical surface with application of a mask (e.g., to remove the medial wall).
 
     Parameters
     ----------
-    fsnative_surface_fname (str):
+    surface_fname (str):
         Filename of input fsnative surface
     medial_fname (str):
         Filename of mask to be applied on the surface (e.g., cortex without medial wall, values = 1 for mask and 0 elsewhere)
@@ -155,12 +156,16 @@ def main():
     print("Eigenmodes")
     print("---------------")
     n_vertices = 64984
-    n_modes = 200
-
     processed = True
 
     eigenvalues = np.zeros([len(demographics["sub"]), n_vertices, 200])
     eigenmodes = np.zeros([len(demographics["sub"]), n_vertices, 200])
+
+    # generate reference eigenmodes (fsLR32k template surface)
+    refence_eigenvalues, reference_eigenmodes = surface_eigenmodes(
+        "../data/raw/fsLR-32k.L.sphere.reg.surf.gii",
+        "../data/raw/fsLR-32k.L.medialwall.label.gii",
+    )
 
     for i, sub, ses, group in enumerate(
         zip(demographics["sub"], demographics["ses"], demographics["group"])
@@ -170,7 +175,6 @@ def main():
                 evals, emodes = surface_eigenmodes(
                     f"../data/raw/controls/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsnative_label-midthickness.surf.gii",
                     f"../datas/raw/controls/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsnative_medialwall.label.gii",
-                    n_modes,
                 )
                 emodes_resampled = resample(
                     emodes,
@@ -178,7 +182,12 @@ def main():
                     "../data/surfaces/fsLR-32k.L.sphere.reg.surf.gii",
                 )
 
-                # Save eigenvalues and eigenmodes as files
+                # align eigenmodes
+                emodes_aligned = procrustes_alignment(
+                    emodes_resampled, reference_eigenmodes
+                )
+
+                # save eigenvalues and eigenmodes as files
                 evals_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_label-eigenvalues.txt"
                 emodes_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsnative_label-eigenmodes.func.gii"
                 emodes_resampled_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsLR-32k_label-eigenmodes.func.gii"
@@ -190,7 +199,7 @@ def main():
                     evals
                 )
                 eigenmodes[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = (
-                    emodes_resampled
+                    emodes_aligned
                 )
 
             else:
