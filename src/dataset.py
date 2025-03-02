@@ -162,11 +162,13 @@ def main():
     eigenmodes = np.zeros([len(demographics["sub"]), n_vertices, 200])
 
     # generate reference eigenmodes (fsLR32k template surface)
+    # L/R hemispheres are symmetrical (i.e. the same)
     refence_eigenvalues, reference_eigenmodes = surface_eigenmodes(
         "../data/raw/fsLR-32k.L.sphere.reg.surf.gii",
         "../data/raw/fsLR-32k.L.medialwall.label.gii",
     )
 
+    # get eigenmodes for each subject
     for i, sub, ses, group in enumerate(
         zip(demographics["sub"], demographics["ses"], demographics["group"])
     ):
@@ -174,8 +176,10 @@ def main():
             if processed:
                 evals, emodes = surface_eigenmodes(
                     f"../data/raw/controls/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsnative_label-midthickness.surf.gii",
-                    f"../datas/raw/controls/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsnative_medialwall.label.gii",
+                    f"../data/raw/controls/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsnative_medialwall.label.gii",
                 )
+
+                # resample to fsLR-32k
                 emodes_resampled = resample(
                     emodes,
                     f"../data/raw/controls/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsnative_label-sphere.surf.gii",
@@ -190,10 +194,10 @@ def main():
                 # save eigenvalues and eigenmodes as files
                 evals_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_label-eigenvalues.txt"
                 emodes_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsnative_label-eigenmodes.func.gii"
-                emodes_resampled_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsLR-32k_label-eigenmodes.func.gii"
+                emodes_aligned_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsLR-32k_label-eigenmodes.func.gii"
                 np.savetxt(evals_fname, evals)
                 nib.save(emodes, emodes_fname)
-                nib.save(emodes_resampled, emodes_resampled_fname)
+                nib.save(emodes_resampled, emodes_aligned_fname)
 
                 eigenvalues[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = (
                     evals
@@ -205,12 +209,14 @@ def main():
             else:
                 eigenvalues[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = (
                     np.loadtxt(
-                        f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_label-eigenvalues.txt"
+                        f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/"
+                        f"sub-{sub}_ses-{ses}_hemi-{hemi}_label-eigenvalues.txt"
                     )
                 )
                 eigenmodes[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = (
                     nib.load(
-                        f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsLR-32k_label-eigenmodes.func.gii"
+                        f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/"
+                        f"sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsLR-32k_label-eigenmodes.func.gii"
                     )
                     .darrays[0]
                     .data
