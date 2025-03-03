@@ -1,14 +1,15 @@
+import os
 import subprocess
 import brainspace.mesh as mesh
 import nibabel as nib
 import numpy as np
 import pandas as pd
 from brainspace.gradient.alignment import procrustes_alignment
-from lapy import Solver, io
+from lapy import Solver, TriaMesh
 
 
 # Helper functions
-def eigenmodes(tria, n_modes):
+def laplace_beltrami(tria, n_modes):
     """Calculate the eigenvalues and eigenmodes of a surface.
 
     Parameters
@@ -47,14 +48,14 @@ def indices(surface_old, surface_new):
     """
 
     # match vertices between old/new surface
-    indices = np.zeros([np.shape(surface_new.Points)[0], 1])
+    idx = np.zeros([np.shape(surface_new.Points)[0], 1])
     for i in range(np.shape(surface_new.Points)[0]):
-        indices[i] = np.where(
+        idx[i] = np.where(
             np.all(np.equal(surface_new.Points[i, :], surface_old.Points), axis=1)
         )[0][0]
-    indices = indices.astype(int)
+    idx = idx.astype(int)
 
-    return indices
+    return idx
 
 
 def surface_eigenmodes(surface_fname, medial_fname, n_modes=200):
@@ -79,14 +80,26 @@ def surface_eigenmodes(surface_fname, medial_fname, n_modes=200):
     surface = mesh.mesh_io.read_surface(surface_fname)
 
     # mask medial wall
-    medial = nib.load(medial_fname).darrays[0].data
+    medial = np.loadtxt(medial_fname)
     new_surface = mesh.mesh_operations.mask_points(surface, medial)
 
     # calculate eigenvalues and eigenmodes
-    tria = io.import_vtk(surface)
+    vtk_fname = (
+        f"../data/tmp/{os.path.basename(surface_fname).replace('.surf.gii', '.vtk')}"
+    )
+    if not os.path.isfile(vtk_fname):
+        vtk_fname = f"../data/tmp/{os.path.basename(surface_fname).replace('.surf.gii', '.vtk')}"
+        cmd = [
+            "mris_convert",
+            surface_fname,
+            vtk_fname,
+        ]
+        process = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+    tria = TriaMesh.read_vtk(vtk_fname)
     tria.v = new_surface.Points
     tria.t = np.reshape(new_surface.Polygons, [new_surface.n_cells, 4])[:, 1:4]
-    evals, emodes = eigenmodes(tria, n_modes)
+    evals, emodes = laplace_beltrami(tria, n_modes)
 
     # reshape emodes to match vertices of original surface
     idx = indices(surface, new_surface)
@@ -95,45 +108,6 @@ def surface_eigenmodes(surface_fname, medial_fname, n_modes=200):
         emodes_reshaped[idx, mode] = np.expand_dims(emodes[:, mode], axis=1)
 
     return evals, emodes_reshaped
-
-
-def resample(data, current_fname, target_fname):
-    """Resample data, given two spherical surfaces that are in register.
-
-    Parameters
-    ----------
-    data (array):
-        Data in the <current> surface to be resampled
-    current_fname (str):
-        Filename of <current> sphere surface mesh
-    target_fname (str):
-        Filename of <target> sphere surface mesh
-
-    Returns
-    ------
-    resampled_data (array): Resampled data in <target> surface
-    """
-    # save data as a temporary file
-    tmp_fname = "../data/tmp/current_data.func.gii"
-    nib.save(data, tmp_fname)
-
-    # resample using workbench command
-    out_fname = "../data/tmp/resampled_data.func.gii"
-    cmd = [
-        "wb_command",
-        "-metric-resample",
-        tmp_fname,
-        current_fname,
-        target_fname,
-        "BARYCENTRIC",
-        out_fname,
-    ]
-    process = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-
-    if not process.returncode:
-        ValueError(f"Resampling failed:\n{process.stderr}")
-
-    return nib.load(out_fname).darrays[0].data
 
 
 # Main function
@@ -146,7 +120,9 @@ def main():
     print()
     print("Demographics")
     print("---------------")
-    demographics = pd.read_csv("../data/raw/demographics.csv")
+    demographics = pd.read_csv(
+        "../data/raw/demographics.csv", converters={"session": str}
+    )
     age = demographics["age"]
     sex = demographics["sex"]
     lateralization = demographics["lateralization"]
@@ -158,62 +134,42 @@ def main():
     n_vertices = 64984
     processed = True
 
-    eigenvalues = np.zeros([len(demographics["sub"]), n_vertices, 200])
-    eigenmodes = np.zeros([len(demographics["sub"]), n_vertices, 200])
-
-    # generate reference eigenmodes (fsLR32k template surface)
-    # L/R hemispheres are symmetrical (i.e. the same)
-    refence_eigenvalues, reference_eigenmodes = surface_eigenmodes(
-        "../data/raw/fsLR-32k.L.sphere.reg.surf.gii",
-        "../data/raw/fsLR-32k.L.medialwall.label.gii",
-    )
+    eigenvalues = np.zeros([len(demographics["subject"]), n_vertices, 200])
+    eigenmodes = np.zeros([len(demographics["subject"]), n_vertices, 200])
 
     # get eigenmodes for each subject
-    for i, sub, ses, group in enumerate(
-        zip(demographics["sub"], demographics["ses"], demographics["group"])
+    for i, (sub, ses, group) in enumerate(
+        zip(demographics["subject"], demographics["session"], demographics["group"])
     ):
         for j, hemi in enumerate(["L", "R"]):
             if processed:
-                evals, emodes = surface_eigenmodes(
-                    f"../data/raw/controls/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsnative_label-midthickness.surf.gii",
-                    f"../data/raw/controls/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsnative_medialwall.label.gii",
-                )
-
-                # resample to fsLR-32k
-                emodes_resampled = resample(
-                    emodes,
-                    f"../data/raw/controls/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsnative_label-sphere.surf.gii",
-                    "../data/surfaces/fsLR-32k.L.sphere.reg.surf.gii",
-                )
-
-                # align eigenmodes
-                emodes_aligned = procrustes_alignment(
-                    emodes_resampled, reference_eigenmodes
-                )
+                # run laplace-beltrami operator
+                surface_fname = f"../data/raw/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsLR-32k_label-midthickness.surf.gii"
+                medial_fname = f"../data/surfaces/fsLR-32k.{hemi}.medialwall.txt"
+                evals, emodes = surface_eigenmodes(surface_fname, medial_fname)
 
                 # save eigenvalues and eigenmodes as files
-                evals_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_label-eigenvalues.txt"
-                emodes_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsnative_label-eigenmodes.func.gii"
-                emodes_aligned_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsLR-32k_label-eigenmodes.func.gii"
-                np.savetxt(evals_fname, evals)
-                nib.save(emodes, emodes_fname)
-                nib.save(emodes_resampled, emodes_aligned_fname)
+                os.makedirs(
+                    f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/",
+                    exist_ok=True,
+                )
 
-                eigenvalues[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = (
-                    evals
+                evals_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_label-eigenvalues.txt"
+                np.savetxt(evals_fname, evals)
+
+                data = nib.gifti.gifti.GiftiImage()
+                data.add_gifti_data_array(
+                    nib.gifti.gifti.GiftiDataArray(data=emodes, datatype="float32")
                 )
-                eigenmodes[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = (
-                    emodes_aligned
-                )
+                emodes_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsLR-32k_label-eigenmodes.func.gii"
+                nib.save(data, emodes_fname)
 
             else:
-                eigenvalues[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = (
-                    np.loadtxt(
-                        f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/"
-                        f"sub-{sub}_ses-{ses}_hemi-{hemi}_label-eigenvalues.txt"
-                    )
+                evals = np.loadtxt(
+                    f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/"
+                    f"sub-{sub}_ses-{ses}_hemi-{hemi}_label-eigenvalues.txt"
                 )
-                eigenmodes[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = (
+                emodes = (
                     nib.load(
                         f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/"
                         f"sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsLR-32k_label-eigenmodes.func.gii"
@@ -221,7 +177,12 @@ def main():
                     .darrays[0]
                     .data
                 )
+
+            eigenvalues[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = evals
+            eigenmodes[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = emodes
+
         print(f"Eigenmodes processed: sub-{sub} ses-{ses}")
+        print()
 
     print()
     print("Save data")
