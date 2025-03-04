@@ -4,7 +4,6 @@ import brainspace.mesh as mesh
 import nibabel as nib
 import numpy as np
 import pandas as pd
-from brainspace.gradient.alignment import procrustes_alignment
 from lapy import Solver, TriaMesh
 
 
