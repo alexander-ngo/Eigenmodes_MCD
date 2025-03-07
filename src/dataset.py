@@ -130,22 +130,25 @@ def main():
     print()
     print("Eigenmodes")
     print("---------------")
+    n_modes = 100
     n_vertices = 64984
     processed = True
 
-    eigenvalues = np.zeros([len(demographics["subject"]), n_vertices, 200])
-    eigenmodes = np.zeros([len(demographics["subject"]), n_vertices, 200])
+    eigenvalues = np.zeros([len(demographics["subject"]), n_modes])
+    eigenmodes = np.zeros([len(demographics["subject"]), n_vertices, n_modes])
 
     # get eigenmodes for each subject
     for i, (sub, ses, group) in enumerate(
         zip(demographics["subject"], demographics["session"], demographics["group"])
     ):
+        print(f"Eigenmodes processing: sub-{sub} ses-{ses}")
+
         for j, hemi in enumerate(["L", "R"]):
             if processed:
                 # run laplace-beltrami operator
                 surface_fname = f"../data/raw/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsLR-32k_label-midthickness.surf.gii"
                 medial_fname = f"../data/surfaces/fsLR-32k.{hemi}.medialwall.txt"
-                evals, emodes = surface_eigenmodes(surface_fname, medial_fname)
+                evals, emodes = surface_eigenmodes(surface_fname, medial_fname, n_modes)
 
                 # save eigenvalues and eigenmodes as files
                 os.makedirs(
@@ -177,10 +180,9 @@ def main():
                     .data
                 )
 
-            eigenvalues[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = evals
+            eigenvalues[i, :] = evals
             eigenmodes[i, n_vertices // 2 * (j) : n_vertices // 2 * (j + 1), :] = emodes
 
-        print(f"Eigenmodes processed: sub-{sub} ses-{ses}")
         print()
 
     print()
