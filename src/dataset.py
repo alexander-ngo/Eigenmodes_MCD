@@ -4,7 +4,7 @@ import brainspace.mesh as mesh
 import nibabel as nib
 import numpy as np
 import pandas as pd
-from lapy import Solver, TriaMesh
+from lapy import shapedna, TriaMesh
 
 
 # Helper functions
@@ -25,8 +25,12 @@ def laplace_beltrami(tria, n_modes):
     """
 
     # laplace-beltrami operator
-    fem = Solver(tria)
-    evals, emodes = fem.eigs(k=n_modes)
+    lbo = shapedna.compute_shapedna(tria, k=n_modes)
+    evals, emodes = lbo["Eigenvalues"], lbo["Eigenvectors"]
+
+    # Normalize and reweight eigenvalues
+    evals = shapedna.normalize_ev(tria, evals, method="geometry")
+    evals = shapedna.reweight_ev(evals)
 
     return evals, emodes
 
