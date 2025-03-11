@@ -1,13 +1,10 @@
 import os
-import ot
 import subprocess
 import brainspace.mesh as mesh
 import nibabel as nib
 import numpy as np
 import pandas as pd
-
 from lapy import Solver, TriaMesh
-from sklearn.metrics.pairwise import cosine_distances
 
 
 # Helper functions
@@ -150,6 +147,7 @@ def main():
             if processed:
                 # run laplace-beltrami operator
                 surface_fname = f"../data/raw/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsLR-32k_label-midthickness.surf.gii"
+                medial_fname = f"../data/surfaces/fsLR-32k.{hemi}.medialwall.txt"
                 evals, emodes = surface_eigenmodes(surface_fname, medial_fname, n_modes)
 
                 # save eigenvalues and eigenmodes as files
