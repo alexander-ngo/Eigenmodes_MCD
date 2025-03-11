@@ -112,31 +112,6 @@ def surface_eigenmodes(surface_fname, medial_fname, n_modes=200):
     return evals, emodes_reshaped
 
 
-def alignment(emodes, reference):
-    """Align eigenmodes to a reference.
-
-    Parameters
-    ----------
-    emodes (array):
-        Eigenmodes of a subject-specific surface
-    template (array):
-        Eigenmodes of a referece surface
-
-    Returns
-    ------
-    emodes_aligned (array): Aligned eigenmodes
-    """
-
-    # calculate cost function
-    cost = cosine_distances(emodes, reference)
-
-    # match eigenmodes to reference based on optimal transport
-    transport = ot.emd([], [], cost)
-    emodes_aligned = transport @ emodes
-
-    return emodes_aligned
-
-
 # Main function
 def main():
     print()
@@ -165,11 +140,6 @@ def main():
     eigenvalues = np.zeros([len(demographics["subject"]), n_modes])
     eigenmodes = np.zeros([len(demographics["subject"]), n_vertices, n_modes])
 
-    # reference (left hemisphere)
-    reference_fname = f"../data/surface/fsLR-32k.L.midthickness.surf.gii"
-    medial_fname = f"../data/surfaces/fsLR-32k.L.medialwall.txt"
-    _, emodes_reference = surface_eigenmodes(reference_fname, medial_fname, n_modes)
-
     # get eigenmodes for each subject
     for i, (sub, ses, group) in enumerate(
         zip(demographics["subject"], demographics["session"], demographics["group"])
@@ -182,9 +152,6 @@ def main():
                 surface_fname = f"../data/raw/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-nativepro_surf-fsLR-32k_label-midthickness.surf.gii"
                 evals, emodes = surface_eigenmodes(surface_fname, medial_fname, n_modes)
 
-                # align eigenmodes to reference
-                emodes_aligned = alignment(emodes, emodes_reference)
-
                 # save eigenvalues and eigenmodes as files
                 os.makedirs(
                     f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/",
@@ -192,13 +159,11 @@ def main():
                 )
 
                 evals_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_label-eigenvalues.txt"
-                np.savetxt(evals_fname, emodes_aligned)
+                np.savetxt(evals_fname, emodes)
 
                 data = nib.gifti.gifti.GiftiImage()
                 data.add_gifti_data_array(
-                    nib.gifti.gifti.GiftiDataArray(
-                        data=emodes_aligned, datatype="float32"
-                    )
+                    nib.gifti.gifti.GiftiDataArray(data=emodes, datatype="float32")
                 )
                 emodes_fname = f"../data/processed/eigenmodes/{group}/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_hemi-{hemi}_space-fsLR-32k_label-eigenmodes.func.gii"
                 nib.save(data, emodes_fname)
